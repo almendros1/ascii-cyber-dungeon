@@ -264,7 +264,7 @@ export function TerminalConsole() {
         setPhase(result.nextPhase)
       }
 
-      if (result.nextRunState) {
+      if (result.nextRunState !== undefined) {
         setRunState(result.nextRunState)
       }
     }
@@ -351,7 +351,7 @@ export function TerminalConsole() {
             >
               {message.type === 'command' && (
                 <span className="output-command-prompt">
-                  {message.prompt ?? 'operator'}@acd:~${'$ '}
+                  {message.prompt ?? 'operator'}@acd:~${' '}
                 </span>
               )}
               {label && <span className="output-tag">[{label}] </span>}

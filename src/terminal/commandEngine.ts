@@ -4,11 +4,12 @@ import {
   createDungeonMap,
   createInitialRunState,
   createNodeIntroduction,
+  createRunSummaryMessages,
   createRunStatusMessages,
   inspectCurrentNode,
   type RunState,
 } from '../game/runState'
-import { PLAYABLE_NODES } from '../game/dungeonNodes'
+import { STANDARD_NODES } from '../game/dungeonNodes'
 
 /**
  * Application-level messages rendered by the simulated terminal.
@@ -42,7 +43,7 @@ export type CommandResult =
       type: 'append'
       messages: TerminalMessageDraft[]
       nextPhase?: GamePhase
-      nextRunState?: RunState
+      nextRunState?: RunState | null
     }
   | {
       type: 'clear'
@@ -104,9 +105,24 @@ export function parseCommand(input: string): ParsedCommand | null {
 }
 
 function createHelpResult(context: CommandContext): CommandResult {
-  const availableCommands = COMMANDS.filter((command) =>
-    command.availableIn.includes(context.phase),
-  )
+  const commandOrderByPhase: Partial<Record<GamePhase, string[]>> = {
+    'main-menu': ['start', 'controls', 'clear', 'help'],
+    'player-setup': ['controls', 'clear', 'help'],
+    playing: [
+      'inspect',
+      'choose',
+      'status',
+      'map',
+      'controls',
+      'clear',
+      'help',
+    ],
+    victory: ['restart', 'menu', 'controls', 'clear', 'help'],
+    defeat: ['restart', 'menu', 'controls', 'clear', 'help'],
+  }
+  const availableCommands = (commandOrderByPhase[context.phase] ?? [])
+    .map((name) => COMMAND_REGISTRY.get(name))
+    .filter((command): command is TerminalCommand => command !== undefined)
 
   const contextMessages: TerminalMessageDraft[] =
     context.phase === 'player-setup'
@@ -156,6 +172,23 @@ function createControlsResult(context: CommandContext): CommandResult {
           },
         ]
       : []
+  const resultControls: TerminalMessageDraft[] =
+    context.phase === 'victory' || context.phase === 'defeat'
+      ? [
+          {
+            type: 'information',
+            text: 'Use RESTART to start a new run with the current operator.',
+          },
+          {
+            type: 'information',
+            text: 'Use MENU to return to the main menu.',
+          },
+          {
+            type: 'information',
+            text: 'The operator profile remains available for the next run.',
+          },
+        ]
+      : []
 
   return {
     type: 'append',
@@ -173,6 +206,7 @@ function createControlsResult(context: CommandContext): CommandResult {
         text: 'Use HELP to list commands available in the current context.',
       },
       ...playingControls,
+      ...resultControls,
       {
         type: 'information',
         text: 'Use Arrow Up and Arrow Down to navigate submitted commands.',
@@ -210,7 +244,7 @@ export function createPlayingIntroduction(
       type: 'information',
       text: 'Type HELP to list available commands.',
     },
-    ...createNodeIntroduction(PLAYABLE_NODES[0]),
+    ...createNodeIntroduction(STANDARD_NODES[0]),
   ]
 }
 
@@ -228,14 +262,26 @@ const COMMANDS: TerminalCommand[] = [
     name: 'help',
     usage: 'help',
     description: 'Show available commands',
-    availableIn: ['main-menu', 'player-setup', 'playing'],
+    availableIn: [
+      'main-menu',
+      'player-setup',
+      'playing',
+      'victory',
+      'defeat',
+    ],
     execute: createHelpResult,
   },
   {
     name: 'controls',
     usage: 'controls',
     description: 'Show terminal and gameplay controls',
-    availableIn: ['main-menu', 'player-setup', 'playing'],
+    availableIn: [
+      'main-menu',
+      'player-setup',
+      'playing',
+      'victory',
+      'defeat',
+    ],
     execute: createControlsResult,
   },
   {
@@ -272,8 +318,14 @@ const COMMANDS: TerminalCommand[] = [
   {
     name: 'clear',
     usage: 'clear',
-    description: 'Clear terminal output',
-    availableIn: ['main-menu', 'player-setup', 'playing'],
+    description: 'Clear visible terminal output',
+    availableIn: [
+      'main-menu',
+      'player-setup',
+      'playing',
+      'victory',
+      'defeat',
+    ],
     execute: () => ({ type: 'clear' }),
   },
   {
@@ -385,13 +437,72 @@ const COMMANDS: TerminalCommand[] = [
       }
 
       const result = chooseCurrentNodeOption(runState, command.args)
+      const resultMessages = result.outcome && context.playerName
+        ? [
+            ...result.messages,
+            ...createRunSummaryMessages(
+              context.playerName,
+              result.outcome,
+              result.state,
+            ),
+          ]
+        : result.messages
 
       return {
         type: 'append',
-        messages: result.messages,
+        messages: resultMessages,
         nextRunState: result.state,
+        nextPhase: result.outcome,
       }
     },
+  },
+  {
+    name: 'restart',
+    usage: 'restart',
+    description: 'Start a new run with the current operator',
+    availableIn: ['victory', 'defeat'],
+    execute: (context) => {
+      if (!context.playerName) {
+        return {
+          type: 'append',
+          messages: [
+            {
+              type: 'error',
+              text: 'Operator profile unavailable. Return to the main menu.',
+            },
+          ],
+        }
+      }
+
+      return {
+        type: 'append',
+        messages: createPlayingIntroduction(context.playerName, true),
+        nextPhase: 'playing',
+        nextRunState: createInitialRunState(),
+      }
+    },
+  },
+  {
+    name: 'menu',
+    usage: 'menu',
+    description: 'Return to the main menu',
+    availableIn: ['victory', 'defeat'],
+    execute: () => ({
+      type: 'append',
+      messages: [
+        {
+          type: 'system',
+          text: '[SESSION] Returning to main menu.',
+        },
+        {
+          type: 'information',
+          text: 'Operator profile retained.',
+        },
+        ...MAIN_MENU_MESSAGES,
+      ],
+      nextPhase: 'main-menu',
+      nextRunState: null,
+    }),
   },
 ]
 
