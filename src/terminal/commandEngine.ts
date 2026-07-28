@@ -1,4 +1,14 @@
 import type { GamePhase } from '../game/gamePhase'
+import {
+  chooseCurrentNodeOption,
+  createDungeonMap,
+  createInitialRunState,
+  createNodeIntroduction,
+  createRunStatusMessages,
+  inspectCurrentNode,
+  type RunState,
+} from '../game/runState'
+import { PLAYABLE_NODES } from '../game/dungeonNodes'
 
 /**
  * Application-level messages rendered by the simulated terminal.
@@ -14,6 +24,7 @@ export type TerminalMessageType =
   | 'warning'
   | 'error'
   | 'safety'
+  | 'success'
 
 export interface TerminalMessageDraft {
   type: TerminalMessageType
@@ -31,6 +42,7 @@ export type CommandResult =
       type: 'append'
       messages: TerminalMessageDraft[]
       nextPhase?: GamePhase
+      nextRunState?: RunState
     }
   | {
       type: 'clear'
@@ -39,13 +51,18 @@ export type CommandResult =
 export interface CommandContext {
   phase: GamePhase
   playerName: string | null
+  runState: RunState | null
 }
 
 interface TerminalCommand {
   name: string
+  usage: string
   description: string
   availableIn: GamePhase[]
-  execute: (context: CommandContext) => CommandResult
+  execute: (
+    context: CommandContext,
+    command: ParsedCommand,
+  ) => CommandResult
 }
 
 export const MAIN_MENU_MESSAGES: TerminalMessageDraft[] = [
@@ -109,15 +126,37 @@ function createHelpResult(context: CommandContext): CommandResult {
         type: 'heading',
         text: 'AVAILABLE COMMANDS',
       },
-      ...availableCommands.map(({ name, description }) => ({
+      ...availableCommands.map(({ usage, description }) => ({
         type: 'information' as const,
-        text: `${name.padEnd(10)} ${description}`,
+        text: `${usage.padEnd(18)} ${description}`,
       })),
     ],
   }
 }
 
-function createControlsResult(): CommandResult {
+function createControlsResult(context: CommandContext): CommandResult {
+  const playingControls: TerminalMessageDraft[] =
+    context.phase === 'playing'
+      ? [
+          {
+            type: 'information',
+            text: 'Use INSPECT to analyse the current node.',
+          },
+          {
+            type: 'information',
+            text: 'Use CHOOSE <number> to select an available option.',
+          },
+          {
+            type: 'information',
+            text: 'Use STATUS to review integrity and the current objective.',
+          },
+          {
+            type: 'information',
+            text: 'Use MAP to view dungeon progress.',
+          },
+        ]
+      : []
+
   return {
     type: 'append',
     messages: [
@@ -133,6 +172,7 @@ function createControlsResult(): CommandResult {
         type: 'information',
         text: 'Use HELP to list commands available in the current context.',
       },
+      ...playingControls,
       {
         type: 'information',
         text: 'Use Arrow Up and Arrow Down to navigate submitted commands.',
@@ -168,17 +208,14 @@ export function createPlayingIntroduction(
     },
     {
       type: 'information',
-      text: '[NODE] Entry Gateway detected.',
-    },
-    {
-      type: 'warning',
-      text: '[NOTICE] Encounter systems will be activated in the next milestone.',
-    },
-    {
-      type: 'information',
       text: 'Type HELP to list available commands.',
     },
+    ...createNodeIntroduction(PLAYABLE_NODES[0]),
   ]
+}
+
+function requireRunState(context: CommandContext): RunState | null {
+  return context.phase === 'playing' ? context.runState : null
 }
 
 /**
@@ -189,18 +226,21 @@ export function createPlayingIntroduction(
 const COMMANDS: TerminalCommand[] = [
   {
     name: 'help',
+    usage: 'help',
     description: 'Show available commands',
     availableIn: ['main-menu', 'player-setup', 'playing'],
     execute: createHelpResult,
   },
   {
     name: 'controls',
+    usage: 'controls',
     description: 'Show terminal and gameplay controls',
     availableIn: ['main-menu', 'player-setup', 'playing'],
     execute: createControlsResult,
   },
   {
     name: 'start',
+    usage: 'start',
     description: 'Begin a new infiltration run',
     availableIn: ['main-menu'],
     execute: (context) => {
@@ -209,6 +249,7 @@ const COMMANDS: TerminalCommand[] = [
           type: 'append',
           messages: createPlayingIntroduction(context.playerName, true),
           nextPhase: 'playing',
+          nextRunState: createInitialRunState(),
         }
       }
 
@@ -230,9 +271,127 @@ const COMMANDS: TerminalCommand[] = [
   },
   {
     name: 'clear',
+    usage: 'clear',
     description: 'Clear terminal output',
     availableIn: ['main-menu', 'player-setup', 'playing'],
     execute: () => ({ type: 'clear' }),
+  },
+  {
+    name: 'status',
+    usage: 'status',
+    description: 'Show current run status',
+    availableIn: ['playing'],
+    execute: (context) => {
+      const runState = requireRunState(context)
+
+      if (!runState || !context.playerName) {
+        return {
+          type: 'append',
+          messages: [
+            {
+              type: 'error',
+              text: 'Run state is unavailable. Start a new session from the main menu.',
+            },
+          ],
+        }
+      }
+
+      return {
+        type: 'append',
+        messages: createRunStatusMessages(context.playerName, runState),
+      }
+    },
+  },
+  {
+    name: 'map',
+    usage: 'map',
+    description: 'Show dungeon progress',
+    availableIn: ['playing'],
+    execute: (context) => {
+      const runState = requireRunState(context)
+
+      if (!runState) {
+        return {
+          type: 'append',
+          messages: [
+            {
+              type: 'error',
+              text: 'Run state is unavailable. Start a new session from the main menu.',
+            },
+          ],
+        }
+      }
+
+      return {
+        type: 'append',
+        messages: [
+          { type: 'heading', text: 'DUNGEON MAP' },
+          { type: 'information', text: createDungeonMap(runState) },
+          {
+            type: 'information',
+            text: '[✓] completed  [>] current  [ ] locked',
+          },
+        ],
+      }
+    },
+  },
+  {
+    name: 'inspect',
+    usage: 'inspect',
+    description: 'Analyse the current node',
+    availableIn: ['playing'],
+    execute: (context) => {
+      const runState = requireRunState(context)
+
+      if (!runState) {
+        return {
+          type: 'append',
+          messages: [
+            {
+              type: 'error',
+              text: 'Run state is unavailable. Start a new session from the main menu.',
+            },
+          ],
+        }
+      }
+
+      const result = inspectCurrentNode(runState)
+
+      return {
+        type: 'append',
+        messages: result.messages,
+        nextRunState: result.state,
+      }
+    },
+  },
+  {
+    name: 'choose',
+    usage: 'choose <number>',
+    description: 'Select an available option',
+    availableIn: ['playing'],
+    execute: (context, command) => {
+      const runState = requireRunState(context)
+
+      if (!runState) {
+        return {
+          type: 'append',
+          messages: [
+            {
+              type: 'error',
+              text: 'Run state is unavailable. Start a new session from the main menu.',
+            },
+          ],
+        }
+      }
+
+      const result = chooseCurrentNodeOption(runState, command.args)
+
+      return {
+        type: 'append',
+        messages: result.messages,
+        nextRunState: result.state,
+      }
+    },
   },
 ]
 
@@ -273,7 +432,7 @@ export function resolveCommand(
       }
     }
 
-    return registeredCommand.execute(context)
+    return registeredCommand.execute(context, command)
   }
 
   return {

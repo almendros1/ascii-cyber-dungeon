@@ -8,6 +8,10 @@ import {
 } from 'react'
 import type { GamePhase } from '../game/gamePhase'
 import {
+  createInitialRunState,
+  type RunState,
+} from '../game/runState'
+import {
   isClearlySuspiciousOperatorInput,
   validateOperatorName,
 } from '../player/playerName'
@@ -43,6 +47,7 @@ const MESSAGE_LABELS: Partial<Record<TerminalMessageType, string>> = {
   warning: 'WARNING',
   error: 'ERROR',
   safety: 'SAFETY',
+  success: 'SUCCESS',
 }
 
 /**
@@ -52,6 +57,7 @@ const MESSAGE_LABELS: Partial<Record<TerminalMessageType, string>> = {
 export function TerminalConsole() {
   const [phase, setPhase] = useState<GamePhase>('booting')
   const [playerName, setPlayerName] = useState(loadStoredPlayerName)
+  const [runState, setRunState] = useState<RunState | null>(null)
   const [messages, setMessages] = useState<TerminalMessage[]>([])
   const [input, setInput] = useState('')
   const [commandHistory, setCommandHistory] = useState<string[]>([])
@@ -200,6 +206,7 @@ export function TerminalConsole() {
     const storageAvailable = savePlayerName(validation.value)
 
     setPlayerName(validation.value)
+    setRunState(createInitialRunState())
     setPhase('playing')
     appendMessages([
       ...createPlayingIntroduction(validation.value, false),
@@ -235,6 +242,7 @@ export function TerminalConsole() {
     const result = resolveCommand(command, {
       phase,
       playerName,
+      runState,
     })
 
     setCommandHistory((history) => [...history, command.normalizedInput])
@@ -254,6 +262,10 @@ export function TerminalConsole() {
 
       if (result.nextPhase) {
         setPhase(result.nextPhase)
+      }
+
+      if (result.nextRunState) {
+        setRunState(result.nextRunState)
       }
     }
 

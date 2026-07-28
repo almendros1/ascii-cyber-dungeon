@@ -148,6 +148,10 @@
   color: var(--terminal-accent-secondary);
 }
 
+.output-line--success {
+  color: var(--terminal-accent);
+}
+
 .output-line--error {
   color: #ff9a9a;
 }
@@ -161,6 +165,7 @@
 }
 
 .output-line--warning .output-tag,
+.output-line--success .output-tag,
 .output-line--error .output-tag {
   color: inherit;
 }
