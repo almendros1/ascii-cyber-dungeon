@@ -296,6 +296,187 @@ Avoid:
 
 Extract constants for important gameplay values when useful.
 
+
+## Code documentation and comments
+
+The codebase is intended to be understandable as a learning and portfolio project.
+
+All non-trivial code must be appropriately documented.
+
+Use comments to explain:
+
+* the purpose of modules;
+* the responsibility of complex components;
+* game-state transitions;
+* terminal command parsing and execution flow;
+* deterministic generation rules;
+* non-obvious gameplay calculations;
+* validation and safety constraints;
+* decisions that may not be immediately clear from the code;
+* temporary limitations or intentional simplifications.
+
+Prefer:
+
+* concise module-level documentation;
+* JSDoc comments for important exported functions and types;
+* comments above non-obvious branches or algorithms;
+* descriptive names that reduce the need for comments.
+
+Do not:
+
+* comment every obvious line;
+* repeat the code in prose;
+* leave outdated comments;
+* use comments to hide unclear or unnecessarily complex code;
+* create large blocks of speculative documentation.
+
+Example:
+
+```ts
+/**
+ * Resolves a command entered in the simulated game terminal.
+ *
+ * This function never executes commands on the host operating system.
+ * It only maps supported command strings to predefined game actions.
+ */
+export function resolveTerminalCommand(
+  command: string,
+  state: GameState,
+): CommandResult {
+  // Implementation
+}
+```
+
+When modifying important game logic, Codex must also explain the change in its final task summary.
+
+## Terminal-first interaction model
+
+The game interface must be controlled primarily through a simulated terminal.
+
+The terminal is part of the web application and must never interact with the real operating-system terminal.
+
+Players interact by entering predefined game commands such as:
+
+```text
+help
+controls
+start
+status
+map
+inspect
+use
+choose
+clear
+restart
+```
+
+The exact command set must be defined incrementally.
+
+The simulated terminal must:
+
+* accept text input;
+* normalize commands safely;
+* parse supported commands;
+* reject unsupported commands gracefully;
+* show readable feedback;
+* maintain a visible command history;
+* expose contextual commands through `help`;
+* remain usable with the keyboard;
+* never evaluate arbitrary JavaScript;
+* never invoke a shell;
+* never access the host filesystem;
+* never execute external programs;
+* never send arbitrary network requests.
+
+Command handling must use an explicit allowlist or command registry.
+
+Example conceptual structure:
+
+```ts
+interface TerminalCommand {
+  name: string
+  aliases?: string[]
+  description: string
+  usage: string
+  execute: CommandHandler
+}
+```
+
+Terminal parsing and game-state changes must remain separate from terminal presentation.
+
+## Terminal boot sequence
+
+Before reaching the main menu, the game should display a short simulated boot sequence.
+
+The sequence may include fictional messages such as:
+
+```text
+[BOOT] Initializing dungeon runtime...
+[LOAD] Importing encounter packages...
+[SYNC] Restoring corrupted node index...
+[SCAN] Detecting hostile daemons...
+[READY] Terminal access established.
+```
+
+These messages are visual fiction only.
+
+The boot sequence must:
+
+* last only a few seconds;
+* remain readable;
+* support reduced-motion preferences;
+* be skippable;
+* avoid pretending to perform real downloads or real system changes;
+* transition into the main terminal menu.
+
+Do not use real package-manager output, real credentials, real IP addresses or claims that the application is modifying the user's device.
+
+## Main menu commands
+
+After the boot sequence, the terminal must present a main menu.
+
+At minimum, the player must be able to use:
+
+```text
+start
+controls
+help
+clear
+```
+
+Expected behaviour:
+
+* `start` begins the initial run;
+* `controls` explains available commands and interaction rules;
+* `help` lists commands available in the current context;
+* `clear` clears visible terminal output without resetting game state.
+
+Controls must remain accessible during the run through:
+
+```text
+controls
+```
+
+The available command list may change according to the current game state.
+
+## Progressive implementation order
+
+Implement the project in this order unless explicitly requested otherwise:
+
+1. Terminal visual design.
+2. Terminal input and output model.
+3. Command registry and parser.
+4. Boot sequence.
+5. Main menu commands.
+6. Controls and contextual help.
+7. Static first encounter.
+8. Minimal playable run.
+9. Result and restart flow.
+10. Additional systems only after the above works.
+
+Do not start procedural generation, complex scoring, tools, inventories or advanced dungeon systems before the terminal foundation and first linear run are complete.
+
+
 ## Testing
 
 Game rules should be testable independently from the user interface.
