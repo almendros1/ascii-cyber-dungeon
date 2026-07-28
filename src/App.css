@@ -180,6 +180,33 @@
   background: rgb(5 13 13 / 92%);
 }
 
+.terminal-boot-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 1rem clamp(1rem, 3vw, 2rem);
+  border-top: 1px solid var(--terminal-border);
+  background: rgb(5 13 13 / 92%);
+}
+
+.boot-skip-button {
+  padding: 0.55rem 0.8rem;
+  border: 1px solid var(--terminal-border-strong);
+  border-radius: 0.2rem;
+  background: rgb(57 255 178 / 5%);
+  color: var(--terminal-text);
+  cursor: pointer;
+}
+
+.boot-skip-button:hover {
+  border-color: var(--terminal-accent);
+  color: var(--terminal-heading);
+}
+
+.boot-skip-button:focus-visible {
+  outline: 2px solid var(--terminal-focus);
+  outline-offset: 3px;
+}
+
 .terminal-prompt {
   color: var(--terminal-accent);
   font-size: clamp(0.76rem, 1.8vw, 0.9rem);
