@@ -25,14 +25,15 @@
 }
 
 html {
-  min-width: 20rem;
+  min-width: 0;
   background: var(--page-background);
 }
 
 body {
-  min-width: 20rem;
-  min-height: 100svh;
+  min-width: 0;
+  min-height: 100dvh;
   margin: 0;
+  overflow-x: hidden;
   background:
     radial-gradient(circle at 50% 0%, rgb(31 93 76 / 16%), transparent 42rem),
     linear-gradient(rgb(4 10 10 / 94%), rgb(1 5 5));
@@ -44,5 +45,5 @@ input {
 }
 
 #root {
-  min-height: 100svh;
+  min-height: 100dvh;
 }

@@ -22,12 +22,19 @@ import {
 import {
   createPlayingIntroduction,
   isRegisteredCommandName,
+  isCommandParseError,
   MAIN_MENU_MESSAGES,
+  MAX_TERMINAL_INPUT_LENGTH,
   parseCommand,
   resolveCommand,
   type TerminalMessageDraft,
   type TerminalMessageType,
 } from '../terminal/commandEngine'
+import {
+  appendCommandHistory,
+  getNextHistoryEntry,
+  getPreviousHistoryEntry,
+} from '../terminal/commandHistory'
 import {
   BOOT_MESSAGES,
   BOOT_MESSAGE_DELAY_MS,
@@ -39,6 +46,11 @@ interface TerminalMessageInput extends TerminalMessageDraft {
 
 interface TerminalMessage extends TerminalMessageInput {
   id: string
+}
+
+interface LiveAnnouncement {
+  id: string
+  text: string
 }
 
 const MESSAGE_LABELS: Partial<Record<TerminalMessageType, string>> = {
@@ -59,6 +71,8 @@ export function TerminalConsole() {
   const [playerName, setPlayerName] = useState(loadStoredPlayerName)
   const [runState, setRunState] = useState<RunState | null>(null)
   const [messages, setMessages] = useState<TerminalMessage[]>([])
+  const [liveAnnouncement, setLiveAnnouncement] =
+    useState<LiveAnnouncement | null>(null)
   const [input, setInput] = useState('')
   const [commandHistory, setCommandHistory] = useState<string[]>([])
   const [historyIndex, setHistoryIndex] = useState<number | null>(null)
@@ -156,10 +170,32 @@ export function TerminalConsole() {
   }, [phase])
 
   function appendMessages(newMessages: TerminalMessageInput[]) {
+    const messagesWithIds = addMessageIds(newMessages)
+
     setMessages((currentMessages) => [
       ...currentMessages,
-      ...addMessageIds(newMessages),
+      ...messagesWithIds,
     ])
+
+    // Announce only the newest meaningful result instead of replaying the
+    // complete terminal history to assistive technology.
+    const announcementMessage = [...messagesWithIds]
+      .reverse()
+      .find((message) =>
+        ['heading', 'system', 'warning', 'error', 'safety', 'success'].includes(
+          message.type,
+        ),
+      )
+
+    if (announcementMessage) {
+      const label = MESSAGE_LABELS[announcementMessage.type]
+      setLiveAnnouncement({
+        id: announcementMessage.id,
+        text: label
+          ? `${label}: ${announcementMessage.text}`
+          : announcementMessage.text,
+      })
+    }
   }
 
   function resetSubmittedInput() {
@@ -223,12 +259,26 @@ export function TerminalConsole() {
   }
 
   function submitCommand() {
-    const command = parseCommand(input)
+    const parseResult = parseCommand(input)
 
-    if (!command) {
+    if (!parseResult) {
       inputRef.current?.focus()
       return
     }
+
+    if (isCommandParseError(parseResult)) {
+      appendMessages([
+        {
+          type: 'error',
+          text: parseResult.message,
+        },
+      ])
+      resetSubmittedInput()
+      inputRef.current?.focus()
+      return
+    }
+
+    const command = parseResult
 
     if (
       phase === 'player-setup' &&
@@ -245,11 +295,14 @@ export function TerminalConsole() {
       runState,
     })
 
-    setCommandHistory((history) => [...history, command.normalizedInput])
+    setCommandHistory((history) =>
+      appendCommandHistory(history, command.normalizedInput),
+    )
     resetSubmittedInput()
 
     if (result.type === 'clear') {
       setMessages([])
+      setLiveAnnouncement(null)
     } else {
       appendMessages([
         {
@@ -285,36 +338,37 @@ export function TerminalConsole() {
     }
 
     if (event.key === 'ArrowUp') {
-      if (commandHistory.length === 0) {
+      const previousEntry = getPreviousHistoryEntry(
+        commandHistory,
+        historyIndex,
+      )
+
+      if (!previousEntry) {
         return
       }
 
       event.preventDefault()
 
-      const nextIndex =
-        historyIndex === null
-          ? commandHistory.length - 1
-          : Math.max(0, historyIndex - 1)
-
       if (historyIndex === null) {
         historyDraftRef.current = input
       }
 
-      setHistoryIndex(nextIndex)
-      setInput(commandHistory[nextIndex])
+      setHistoryIndex(previousEntry.index)
+      setInput(previousEntry.value)
       return
     }
 
-    if (event.key === 'ArrowDown' && historyIndex !== null) {
-      event.preventDefault()
+    if (event.key === 'ArrowDown') {
+      const nextEntry = getNextHistoryEntry(
+        commandHistory,
+        historyIndex,
+        historyDraftRef.current,
+      )
 
-      if (historyIndex < commandHistory.length - 1) {
-        const nextIndex = historyIndex + 1
-        setHistoryIndex(nextIndex)
-        setInput(commandHistory[nextIndex])
-      } else {
-        setHistoryIndex(null)
-        setInput(historyDraftRef.current)
+      if (nextEntry) {
+        event.preventDefault()
+        setHistoryIndex(nextEntry.index)
+        setInput(nextEntry.value)
       }
     }
   }
@@ -334,12 +388,12 @@ export function TerminalConsole() {
   return (
     <>
       <section
-        className="terminal-output"
+        className={`terminal-output terminal-output--${phase}`}
         ref={outputRef}
-        role="log"
+        role="region"
         aria-label="Terminal output"
-        aria-live="polite"
-        aria-relevant="additions text"
+        aria-busy={phase === 'booting'}
+        tabIndex={0}
       >
         {messages.map((message) => {
           const label = MESSAGE_LABELS[message.type]
@@ -361,6 +415,17 @@ export function TerminalConsole() {
         })}
       </section>
 
+      <div
+        className="visually-hidden"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        {liveAnnouncement && (
+          <span key={liveAnnouncement.id}>{liveAnnouncement.text}</span>
+        )}
+      </div>
+
       {phase === 'booting' ? (
         <div className="terminal-boot-actions">
           <button
@@ -379,7 +444,9 @@ export function TerminalConsole() {
           </span>
           <span className="input-indicator" aria-hidden="true" />
           <label className="visually-hidden" htmlFor="terminal-input">
-            Terminal command input
+            {phase === 'player-setup'
+              ? 'Operator name input'
+              : 'Terminal command input'}
           </label>
           <input
             className="terminal-input"
@@ -387,6 +454,7 @@ export function TerminalConsole() {
             ref={inputRef}
             name="terminal-input"
             type="text"
+            maxLength={MAX_TERMINAL_INPUT_LENGTH}
             value={input}
             onChange={(event) => {
               setInput(event.target.value)

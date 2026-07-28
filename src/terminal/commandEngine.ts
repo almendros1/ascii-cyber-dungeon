@@ -38,6 +38,18 @@ export interface ParsedCommand {
   normalizedInput: string
 }
 
+export interface CommandParseError {
+  type: 'input-too-long'
+  message: string
+}
+
+export type CommandParseResult =
+  | ParsedCommand
+  | CommandParseError
+  | null
+
+export const MAX_TERMINAL_INPUT_LENGTH = 256
+
 export type CommandResult =
   | {
       type: 'append'
@@ -59,7 +71,7 @@ interface TerminalCommand {
   name: string
   usage: string
   description: string
-  availableIn: GamePhase[]
+  acceptsArguments?: boolean
   execute: (
     context: CommandContext,
     command: ParsedCommand,
@@ -81,14 +93,37 @@ export const MAIN_MENU_MESSAGES: TerminalMessageDraft[] = [
   },
 ]
 
+const COMMAND_ORDER_BY_PHASE: Partial<Record<GamePhase, string[]>> = {
+  'main-menu': ['start', 'controls', 'clear', 'help'],
+  'player-setup': ['controls', 'clear', 'help'],
+  playing: [
+    'inspect',
+    'choose',
+    'status',
+    'map',
+    'controls',
+    'clear',
+    'help',
+  ],
+  victory: ['restart', 'menu', 'controls', 'clear', 'help'],
+  defeat: ['restart', 'menu', 'controls', 'clear', 'help'],
+}
+
 /**
  * Converts raw text into a predictable application command.
  *
  * Surrounding whitespace is removed, repeated whitespace is collapsed and the
- * result is lowercased. Returning `null` for empty input lets the UI ignore it
- * without adding output or command-history entries.
+ * result is lowercased. Oversized input is rejected before normalization so it
+ * cannot be echoed into the terminal or retained in command history.
  */
-export function parseCommand(input: string): ParsedCommand | null {
+export function parseCommand(input: string): CommandParseResult {
+  if (input.length > MAX_TERMINAL_INPUT_LENGTH) {
+    return {
+      type: 'input-too-long',
+      message: `Input exceeds the ${MAX_TERMINAL_INPUT_LENGTH}-character terminal limit.`,
+    }
+  }
+
   const normalizedInput = input.trim().replace(/\s+/g, ' ').toLowerCase()
 
   if (normalizedInput.length === 0) {
@@ -104,23 +139,14 @@ export function parseCommand(input: string): ParsedCommand | null {
   }
 }
 
+export function isCommandParseError(
+  result: CommandParseResult,
+): result is CommandParseError {
+  return result !== null && 'type' in result
+}
+
 function createHelpResult(context: CommandContext): CommandResult {
-  const commandOrderByPhase: Partial<Record<GamePhase, string[]>> = {
-    'main-menu': ['start', 'controls', 'clear', 'help'],
-    'player-setup': ['controls', 'clear', 'help'],
-    playing: [
-      'inspect',
-      'choose',
-      'status',
-      'map',
-      'controls',
-      'clear',
-      'help',
-    ],
-    victory: ['restart', 'menu', 'controls', 'clear', 'help'],
-    defeat: ['restart', 'menu', 'controls', 'clear', 'help'],
-  }
-  const availableCommands = (commandOrderByPhase[context.phase] ?? [])
+  const availableCommands = getAvailableCommandNames(context.phase)
     .map((name) => COMMAND_REGISTRY.get(name))
     .filter((command): command is TerminalCommand => command !== undefined)
 
@@ -262,33 +288,18 @@ const COMMANDS: TerminalCommand[] = [
     name: 'help',
     usage: 'help',
     description: 'Show available commands',
-    availableIn: [
-      'main-menu',
-      'player-setup',
-      'playing',
-      'victory',
-      'defeat',
-    ],
     execute: createHelpResult,
   },
   {
     name: 'controls',
     usage: 'controls',
     description: 'Show terminal and gameplay controls',
-    availableIn: [
-      'main-menu',
-      'player-setup',
-      'playing',
-      'victory',
-      'defeat',
-    ],
     execute: createControlsResult,
   },
   {
     name: 'start',
     usage: 'start',
     description: 'Begin a new infiltration run',
-    availableIn: ['main-menu'],
     execute: (context) => {
       if (context.playerName) {
         return {
@@ -319,20 +330,12 @@ const COMMANDS: TerminalCommand[] = [
     name: 'clear',
     usage: 'clear',
     description: 'Clear visible terminal output',
-    availableIn: [
-      'main-menu',
-      'player-setup',
-      'playing',
-      'victory',
-      'defeat',
-    ],
     execute: () => ({ type: 'clear' }),
   },
   {
     name: 'status',
     usage: 'status',
     description: 'Show current run status',
-    availableIn: ['playing'],
     execute: (context) => {
       const runState = requireRunState(context)
 
@@ -358,7 +361,6 @@ const COMMANDS: TerminalCommand[] = [
     name: 'map',
     usage: 'map',
     description: 'Show dungeon progress',
-    availableIn: ['playing'],
     execute: (context) => {
       const runState = requireRunState(context)
 
@@ -391,7 +393,6 @@ const COMMANDS: TerminalCommand[] = [
     name: 'inspect',
     usage: 'inspect',
     description: 'Analyse the current node',
-    availableIn: ['playing'],
     execute: (context) => {
       const runState = requireRunState(context)
 
@@ -420,7 +421,7 @@ const COMMANDS: TerminalCommand[] = [
     name: 'choose',
     usage: 'choose <number>',
     description: 'Select an available option',
-    availableIn: ['playing'],
+    acceptsArguments: true,
     execute: (context, command) => {
       const runState = requireRunState(context)
 
@@ -460,7 +461,6 @@ const COMMANDS: TerminalCommand[] = [
     name: 'restart',
     usage: 'restart',
     description: 'Start a new run with the current operator',
-    availableIn: ['victory', 'defeat'],
     execute: (context) => {
       if (!context.playerName) {
         return {
@@ -486,7 +486,6 @@ const COMMANDS: TerminalCommand[] = [
     name: 'menu',
     usage: 'menu',
     description: 'Return to the main menu',
-    availableIn: ['victory', 'defeat'],
     execute: () => ({
       type: 'append',
       messages: [
@@ -515,6 +514,13 @@ export function isRegisteredCommandName(name: string): boolean {
 }
 
 /**
+ * Returns the same ordered command list used by contextual help.
+ */
+export function getAvailableCommandNames(phase: GamePhase): string[] {
+  return [...(COMMAND_ORDER_BY_PHASE[phase] ?? [])]
+}
+
+/**
  * Resolves a parsed command exclusively through the explicit command registry.
  *
  * Unknown input produces display messages only. No branch executes arbitrary
@@ -527,7 +533,7 @@ export function resolveCommand(
   const registeredCommand = COMMAND_REGISTRY.get(command.name)
 
   if (registeredCommand) {
-    if (!registeredCommand.availableIn.includes(context.phase)) {
+    if (!getAvailableCommandNames(context.phase).includes(command.name)) {
       return {
         type: 'append',
         messages: [
@@ -538,6 +544,21 @@ export function resolveCommand(
           {
             type: 'information',
             text: 'Type HELP to list available commands.',
+          },
+        ],
+      }
+    }
+
+    if (
+      command.args.length > 0 &&
+      !registeredCommand.acceptsArguments
+    ) {
+      return {
+        type: 'append',
+        messages: [
+          {
+            type: 'error',
+            text: `Unexpected arguments. Usage: ${registeredCommand.usage}`,
           },
         ],
       }

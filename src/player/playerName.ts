@@ -1,7 +1,7 @@
 const OPERATOR_NAME_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]{1,19}$/
 
 const SUSPICIOUS_INPUT_PATTERNS = [
-  /\bignore\s+(?:all|previous)\s+instructions\b/i,
+  /\bignore\s+(?:(?:all\s+)?previous|all)\s+instructions\b/i,
   /\bsystem\s+prompt\b/i,
   /\bdeveloper\s+message\b/i,
   /\breveal\s+(?:your|the)\s+prompt\b/i,
